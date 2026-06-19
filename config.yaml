@@ -8,6 +8,12 @@ timeframes:
   context: 1h
   macro: 4h
 
+binance:
+  base_url: https://fapi.binance.com
+  timeout_seconds: 10.0
+  kline_limit: 300
+  derivatives_data_limit: 100
+
 telegram:
   enabled: false
   bot_token_env: TELEGRAM_BOT_TOKEN
