@@ -4,9 +4,11 @@ Clean scaffold for a Binance Futures crypto signal bot based on the planned **RF
 
 This repository is a fresh project. It does **not** copy the old `crypto-flow-bot` strategy logic. The old repository may be used later only as a reference for generic infrastructure patterns such as data access, Telegram alerts, virtual position tracking, JSONL logs, YAML config, and risk-management utilities.
 
-## PR 1 scope
+## Current scope
 
-PR 1 creates only the foundation:
+### PR 1 — project scaffold
+
+PR 1 created the foundation:
 
 - Python 3.11+ package with `src/` layout
 - typed domain models for snapshots, decisions, exits, and virtual positions
@@ -16,12 +18,23 @@ PR 1 creates only the foundation:
 - unit tests for config and models
 - ruff and pytest configuration
 
-PR 1 intentionally does **not** implement:
+### PR 2 — Binance data layer
 
-- Binance REST or WebSocket integration
+PR 2 adds a read-only Binance USDⓈ-M Futures market-data layer:
+
+- public REST transport with stdlib `urllib`
+- dependency-injected transport protocol for tests and later replay/backtest
+- typed data models for klines, open interest, funding, global long/short ratio, taker buy/sell volume, and liquidation orders
+- config section for Binance public data settings
+- tests using fakes with exact production signatures
+
+PR 2 intentionally does **not** implement:
+
+- Binance private account access
+- order placement, order cancellation, or account changes
+- WebSocket streams
 - Telegram API sending
-- real order execution
-- automated trading
+- real trading execution
 - full RFA strategy calculation
 - backtest or replay
 
@@ -48,6 +61,17 @@ The bot is designed for Telegram alerts and virtual positions only. It must not 
 - Entry timeframe: `15m`
 - Context timeframe: `1h`
 - Macro timeframe: `4h`
+
+## Binance public data endpoints prepared in PR 2
+
+- Klines: `/fapi/v1/klines`
+- Present open interest: `/fapi/v1/openInterest`
+- Funding-rate history: `/fapi/v1/fundingRate`
+- Global long/short account ratio: `/futures/data/globalLongShortAccountRatio`
+- Taker buy/sell volume: `/futures/data/takerlongshortRatio`
+- Public forced liquidation orders: `/fapi/v1/allForceOrders`
+
+These endpoints are read-only market-data sources and use only public requests.
 
 ## Signal types
 
