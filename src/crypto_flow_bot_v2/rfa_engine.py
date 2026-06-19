@@ -253,9 +253,10 @@ def _score_direction(snapshot: MarketSnapshot, direction: SignalDirection) -> _S
 
     funding_rate = _metric_float(snapshot, "funding_rate")
     funding_alignment = sign * funding_rate
+    is_reversal = signal_type in {SignalType.LONG_REVERSAL, SignalType.SHORT_REVERSAL}
     if 0 < funding_alignment <= 0.001:
         add(4, "funding is directionally aligned without being extreme")
-    elif signal_type in {SignalType.LONG_REVERSAL, SignalType.SHORT_REVERSAL} and funding_alignment < 0:
+    elif is_reversal and funding_alignment < 0:
         add(3, "funding is contrarian for a reversal setup")
     else:
         reasons.append("funding does not add usable directional confirmation")
