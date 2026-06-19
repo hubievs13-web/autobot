@@ -12,7 +12,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Protocol
 
-from crypto_flow_bot_v2.models import ExitPlan, SignalDirection, SignalType, VirtualPosition
+from crypto_flow_bot_v2.models import (
+    ExitPlan,
+    SignalDecision,
+    SignalDirection,
+    SignalType,
+    VirtualPosition,
+)
 from crypto_flow_bot_v2.position_manager import (
     PositionEvent,
     PositionEventType,
@@ -103,7 +109,7 @@ class PersistentVirtualPositionManager:
 
         return self._manager.is_on_cooldown(symbol, timestamp)
 
-    def open_from_decision(self, decision: Any) -> PositionEvent:
+    def open_from_decision(self, decision: SignalDecision) -> PositionEvent:
         """Open a virtual position and persist state when state changes."""
 
         event = self._manager.open_from_decision(decision)
@@ -193,9 +199,12 @@ def _snapshot_from_payload(payload: Any) -> PositionManagerSnapshot:
         msg = "Position state field 'cooldown_until' must be a mapping."
         raise PositionPersistenceError(msg)
 
+    cooldown_until = {
+        str(symbol).upper(): _parse_datetime(value) for symbol, value in cooldown_raw.items()
+    }
     return PositionManagerSnapshot(
         positions=tuple(_position_state_from_payload(item) for item in positions_raw),
-        cooldown_until={str(symbol).upper(): _parse_datetime(value) for symbol, value in cooldown_raw.items()},
+        cooldown_until=cooldown_until,
     )
 
 
