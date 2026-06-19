@@ -5,13 +5,15 @@ from __future__ import annotations
 import os
 
 from crypto_flow_bot_v2.config import DEFAULT_CONFIG_PATH, load_config
+from crypto_flow_bot_v2.live_runner import LiveAlertRunner
 from crypto_flow_bot_v2.logging import configure_logging, get_logger
 
 LOGGER = get_logger(__name__)
+TRUE_VALUES = {"1", "true", "yes", "on"}
 
 
 def main() -> int:
-    """Load configuration and print a safe startup summary."""
+    """Load configuration and either print a safe summary or start the live alert runner."""
 
     config_path = os.getenv("CONFIG_PATH", str(DEFAULT_CONFIG_PATH))
     config = load_config(config_path)
@@ -35,7 +37,61 @@ def main() -> int:
         config.telegram.chat_id_env,
     )
     LOGGER.info("No Binance private API or real trading execution is active.")
+
+    if not _live_runner_enabled():
+        LOGGER.info("Live runner disabled. Set LIVE_RUNNER_ENABLED=true to start alerts.")
+        return 0
+
+    cycle_interval_seconds = _env_int("LIVE_CYCLE_INTERVAL_SECONDS", default=900)
+    max_cycles = _env_optional_int("LIVE_RUNNER_MAX_CYCLES")
+    LOGGER.info(
+        "Starting live Telegram-only runner: interval_seconds=%s max_cycles=%s",
+        cycle_interval_seconds,
+        max_cycles,
+    )
+    runner = LiveAlertRunner.from_config(
+        config=config,
+        cycle_interval_seconds=cycle_interval_seconds,
+    )
+    stats = runner.run(max_cycles=max_cycles)
+    LOGGER.info(
+        "Live runner stopped: cycles=%s snapshots=%s decisions=%s opened=%s closed=%s "
+        "alerts_sent=%s alert_errors=%s",
+        stats.cycles,
+        stats.snapshots_built,
+        stats.decisions_evaluated,
+        stats.positions_opened,
+        stats.positions_closed,
+        stats.telegram_alerts_sent,
+        stats.telegram_alert_errors,
+    )
     return 0
+
+
+def _live_runner_enabled() -> bool:
+    return os.getenv("LIVE_RUNNER_ENABLED", "").strip().lower() in TRUE_VALUES
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return default
+    value = int(raw)
+    if value <= 0:
+        msg = f"{name} must be positive."
+        raise ValueError(msg)
+    return value
+
+
+def _env_optional_int(name: str) -> int | None:
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return None
+    value = int(raw)
+    if value <= 0:
+        msg = f"{name} must be positive when provided."
+        raise ValueError(msg)
+    return value
 
 
 if __name__ == "__main__":
