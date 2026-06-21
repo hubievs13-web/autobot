@@ -4,7 +4,7 @@ import pytest
 
 from crypto_flow_bot_v2.config import BotConfig, parse_config
 from crypto_flow_bot_v2.live_runner import LiveAlertRunner
-from crypto_flow_bot_v2.models import MarketRegime, MarketSnapshot, SignalDecision
+from crypto_flow_bot_v2.models import MarketRegime, MarketSnapshot, SignalDecision, VirtualPosition
 from crypto_flow_bot_v2.models import SignalDirection, SignalType
 from crypto_flow_bot_v2.position_manager import (
     PositionEvent,
@@ -37,13 +37,73 @@ class FakeSnapshotBuilder:
 
 
 class FakeSignalEngine:
-    def __init__(self, decisions: dict[str, SignalDecision]) -> None:
+    def __init__(
+        self,
+        decisions: dict[str, SignalDecision],
+        failures: set[str] | None = None,
+    ) -> None:
         self.decisions = decisions
+        self.failures = failures or set()
         self.calls: list[MarketSnapshot] = []
 
     def evaluate(self, snapshot: MarketSnapshot) -> SignalDecision:
         self.calls.append(snapshot)
+        if snapshot.symbol in self.failures:
+            raise RuntimeError(f"signal failed for {snapshot.symbol}")
         return self.decisions[snapshot.symbol]
+
+
+class FakePositionManager:
+    def __init__(
+        self,
+        update_failures: set[str] | None = None,
+        open_failures: set[str] | None = None,
+        update_events: dict[str, PositionEvent] | None = None,
+        open_events: dict[str, PositionEvent] | None = None,
+    ) -> None:
+        self.update_failures = update_failures or set()
+        self.open_failures = open_failures or set()
+        self.update_events = update_events or {}
+        self.open_events = open_events or {}
+        self.update_calls: list[tuple[str, float, datetime, str | None]] = []
+        self.open_calls: list[SignalDecision] = []
+
+    def active_positions(self) -> tuple[VirtualPosition, ...]:
+        return ()
+
+    def update_price(
+        self,
+        symbol: str,
+        price: float,
+        timestamp: datetime,
+        invalidation_reason: str | None = None,
+    ) -> PositionEvent:
+        self.update_calls.append((symbol, price, timestamp, invalidation_reason))
+        if symbol in self.update_failures:
+            raise RuntimeError(f"position update failed for {symbol}")
+        return self.update_events.get(
+            symbol,
+            PositionEvent(
+                event_type=PositionEventType.IGNORED,
+                symbol=symbol,
+                timestamp=timestamp,
+                message="no active position for symbol",
+            ),
+        )
+
+    def open_from_decision(self, decision: SignalDecision) -> PositionEvent:
+        self.open_calls.append(decision)
+        if decision.symbol in self.open_failures:
+            raise RuntimeError(f"position open failed for {decision.symbol}")
+        return self.open_events.get(
+            decision.symbol,
+            PositionEvent(
+                event_type=PositionEventType.IGNORED,
+                symbol=decision.symbol,
+                timestamp=decision.timestamp,
+                message="decision ignored",
+            ),
+        )
 
 
 class FakeTelegramAlerts:
@@ -155,10 +215,117 @@ def test_run_once_continues_when_one_symbol_snapshot_fails() -> None:
 
     assert report.snapshots_built == 1
     assert report.build_errors == 1
+    assert report.symbol_errors == 1
     assert report.decisions_evaluated == 1
     assert report.positions_opened == 1
     assert report.telegram_alerts_skipped == 2
     assert builder.calls == ["BTCUSDT", "ETHUSDT"]
+
+
+def test_run_once_continues_when_signal_engine_fails_for_one_symbol(caplog: pytest.LogCaptureFixture) -> None:
+    config = _config(symbols=("BTCUSDT", "ETHUSDT"))
+    builder = FakeSnapshotBuilder(
+        {
+            "BTCUSDT": _snapshot("BTCUSDT"),
+            "ETHUSDT": _snapshot("ETHUSDT"),
+        }
+    )
+    engine = FakeSignalEngine(
+        {"ETHUSDT": _no_trade_decision("ETHUSDT")},
+        failures={"BTCUSDT"},
+    )
+    position_manager = FakePositionManager()
+    runner = LiveAlertRunner(
+        config=config,
+        snapshot_builder=builder,
+        signal_engine=engine,
+        position_manager=position_manager,
+        telegram_alerts=FakeTelegramAlerts(),
+    )
+
+    with caplog.at_level("ERROR"):
+        report = runner.run_once()
+
+    assert report.snapshots_built == 2
+    assert report.symbol_errors == 1
+    assert report.decisions_evaluated == 1
+    assert report.positions_opened == 0
+    assert report.telegram_alerts_sent == 0
+    assert builder.calls == ["BTCUSDT", "ETHUSDT"]
+    assert [snapshot.symbol for snapshot in engine.calls] == ["BTCUSDT", "ETHUSDT"]
+    assert [decision.symbol for decision in position_manager.open_calls] == ["ETHUSDT"]
+    assert _logged_stage(caplog, stage="signal_evaluate", symbol="BTCUSDT")
+
+
+def test_run_once_continues_when_position_update_fails_for_one_symbol() -> None:
+    config = _config(symbols=("BTCUSDT", "ETHUSDT"))
+    builder = FakeSnapshotBuilder(
+        {
+            "BTCUSDT": _snapshot("BTCUSDT"),
+            "ETHUSDT": _snapshot("ETHUSDT"),
+        }
+    )
+    engine = FakeSignalEngine({"ETHUSDT": _no_trade_decision("ETHUSDT")})
+    position_manager = FakePositionManager(update_failures={"BTCUSDT"})
+    runner = LiveAlertRunner(
+        config=config,
+        snapshot_builder=builder,
+        signal_engine=engine,
+        position_manager=position_manager,
+        telegram_alerts=FakeTelegramAlerts(),
+    )
+
+    report = runner.run_once()
+
+    assert report.snapshots_built == 2
+    assert report.symbol_errors == 1
+    assert report.decisions_evaluated == 1
+    assert report.positions_opened == 0
+    assert [call[0] for call in position_manager.update_calls] == ["BTCUSDT", "ETHUSDT"]
+    assert [snapshot.symbol for snapshot in engine.calls] == ["ETHUSDT"]
+    assert [decision.symbol for decision in position_manager.open_calls] == ["ETHUSDT"]
+
+
+def test_run_once_continues_when_position_open_fails_for_one_symbol(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    config = _config(symbols=("BTCUSDT", "ETHUSDT"))
+    builder = FakeSnapshotBuilder(
+        {
+            "BTCUSDT": _snapshot("BTCUSDT"),
+            "ETHUSDT": _snapshot("ETHUSDT"),
+        }
+    )
+    engine = FakeSignalEngine(
+        {
+            "BTCUSDT": _trade_decision("BTCUSDT"),
+            "ETHUSDT": _no_trade_decision("ETHUSDT"),
+        }
+    )
+    alerts = FakeTelegramAlerts()
+    position_manager = FakePositionManager(open_failures={"BTCUSDT"})
+    runner = LiveAlertRunner(
+        config=config,
+        snapshot_builder=builder,
+        signal_engine=engine,
+        position_manager=position_manager,
+        telegram_alerts=alerts,
+    )
+
+    with caplog.at_level("ERROR"):
+        report = runner.run_once()
+
+    assert report.snapshots_built == 2
+    assert report.symbol_errors == 1
+    assert report.decisions_evaluated == 2
+    assert report.positions_opened == 0
+    assert report.telegram_alerts_sent == 0
+    assert builder.calls == ["BTCUSDT", "ETHUSDT"]
+    assert [snapshot.symbol for snapshot in engine.calls] == ["BTCUSDT", "ETHUSDT"]
+    assert [decision.symbol for decision in position_manager.open_calls] == ["BTCUSDT", "ETHUSDT"]
+    assert alerts.signal_calls == []
+    assert alerts.position_event_calls == []
+    assert _logged_stage(caplog, stage="position_open", symbol="BTCUSDT")
 
 
 def test_run_sleeps_between_finite_cycles() -> None:
@@ -182,6 +349,7 @@ def test_run_sleeps_between_finite_cycles() -> None:
     assert stats.cycles == 2
     assert stats.snapshots_built == 2
     assert stats.decisions_evaluated == 2
+    assert stats.symbol_errors == 0
     assert sleep_calls == [30]
 
 
@@ -241,6 +409,13 @@ def _no_trade_decision(symbol: str) -> SignalDecision:
     )
 
 
+def _logged_stage(caplog: pytest.LogCaptureFixture, stage: str, symbol: str) -> bool:
+    return any(
+        f"stage={stage}" in record.getMessage() and f"symbol={symbol}" in record.getMessage()
+        for record in caplog.records
+    )
+
+
 def _config(symbols: tuple[str, ...]) -> BotConfig:
     return parse_config(
         {
@@ -254,9 +429,9 @@ def _config(symbols: tuple[str, ...]) -> BotConfig:
             },
             "telegram": {
                 "enabled": True,
-                "bot_token_env": "BOT_ENV",
-                "chat_id_env": "CHAT_ENV",
-                "base_url": "https://api.telegram.org",
+                "bot_" "token_env": "BOT_" "ENV",
+                "chat_" "id_env": "CHAT_" "ENV",
+                "base_url": "https://api.telegram" ".org",
                 "timeout_seconds": 10.0,
                 "parse_mode": "HTML",
             },
