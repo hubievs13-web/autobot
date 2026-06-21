@@ -30,11 +30,11 @@ USER_AGENT = "crypto-flow-bot-v2/0.1.0"
 
 @dataclass(frozen=True, slots=True)
 class TelegramCommandUpdate:
-    """Minimal inbound Telegram message needed to handle /start."""
+    """Minimal inbound Telegram update needed to handle or acknowledge /start."""
 
     update_id: int
-    chat_id: str
-    text: str
+    chat_id: str | None = None
+    text: str | None = None
 
 
 class TelegramStartCommandPoller:
@@ -50,6 +50,7 @@ class TelegramStartCommandPoller:
         self._transport = transport or UrlLibTelegramTransport.from_config(config.telegram)
         self._poll_interval_seconds = poll_interval_seconds
         self._update_offset: int | None = None
+        self._processed_update_ids: set[int] = set()
 
     def run_forever(self, stop_event: Event) -> None:
         """Poll until stop_event is set."""
@@ -76,20 +77,38 @@ class TelegramStartCommandPoller:
             return 0
 
         updates = self._get_updates(bot_token)
-        if updates:
-            self._update_offset = max(update.update_id for update in updates) + 1
 
         handled = 0
         for update in updates:
-            if not _is_start_command(update.text):
+            if update.update_id in self._processed_update_ids:
                 continue
-            self._transport.send_message(
-                bot_token=bot_token,
-                chat_id=update.chat_id,
-                text=format_start_message(),
-                parse_mode=telegram.parse_mode,
-            )
+            if not _is_start_command(update.text) or not update.chat_id:
+                self._mark_update_processed(update.update_id)
+                continue
+            try:
+                send_result = self._transport.send_message(
+                    bot_token=bot_token,
+                    chat_id=update.chat_id,
+                    text=format_start_message(),
+                    parse_mode=telegram.parse_mode,
+                )
+                if not send_result.ok:
+                    msg = (
+                        "Telegram API returned unsuccessful send result "
+                        "for /start welcome message."
+                    )
+                    raise TelegramAlertError(msg)
+            except Exception:
+                LOGGER.exception(
+                    "failed to send Telegram /start welcome message update_id=%s chat_id=%s",
+                    update.update_id,
+                    update.chat_id,
+                )
+                continue
+            self._mark_update_processed(update.update_id)
             handled += 1
+
+        self._advance_update_offset(updates)
         return handled
 
     def _get_updates(self, bot_token: str) -> tuple[TelegramCommandUpdate, ...]:
@@ -133,8 +152,30 @@ class TelegramStartCommandPoller:
             if (update := _parse_update(raw_update)) is not None
         )
 
+    def _mark_update_processed(self, update_id: int) -> None:
+        self._processed_update_ids.add(update_id)
 
-def _is_start_command(text: str) -> bool:
+    def _advance_update_offset(self, updates: tuple[TelegramCommandUpdate, ...]) -> None:
+        next_offset = self._update_offset
+        for update_id in sorted(update.update_id for update in updates):
+            if next_offset is not None and update_id < next_offset:
+                self._processed_update_ids.discard(update_id)
+                continue
+            if update_id not in self._processed_update_ids:
+                break
+            next_offset = update_id + 1
+            self._processed_update_ids.discard(update_id)
+
+        self._update_offset = next_offset
+        if next_offset is not None:
+            self._processed_update_ids = {
+                update_id for update_id in self._processed_update_ids if update_id >= next_offset
+            }
+
+
+def _is_start_command(text: str | None) -> bool:
+    if text is None:
+        return False
     stripped = text.strip()
     if not stripped:
         return False
@@ -148,16 +189,19 @@ def _parse_update(raw_update: object) -> TelegramCommandUpdate | None:
     update_id = raw_update.get("update_id")
     if not isinstance(update_id, int):
         return None
+
     message = raw_update.get("message")
     if not isinstance(message, dict):
-        return None
+        return TelegramCommandUpdate(update_id=update_id)
     text = message.get("text")
-    if not isinstance(text, str):
-        return None
     chat = message.get("chat")
-    if not isinstance(chat, dict):
-        return None
-    chat_id = chat.get("id")
-    if not isinstance(chat_id, int | str):
-        return None
-    return TelegramCommandUpdate(update_id=update_id, chat_id=str(chat_id), text=text)
+    chat_id: str | None = None
+    if isinstance(chat, dict):
+        raw_chat_id = chat.get("id")
+        if isinstance(raw_chat_id, int | str):
+            chat_id = str(raw_chat_id)
+    return TelegramCommandUpdate(
+        update_id=update_id,
+        chat_id=chat_id,
+        text=text if isinstance(text, str) else None,
+    )
