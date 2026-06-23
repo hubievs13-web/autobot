@@ -6,6 +6,42 @@ from crypto_flow_bot_v2.live_runner import LiveRunStats
 from crypto_flow_bot_v2.telegram import TelegramAlertResult, TelegramAlertStatus
 
 
+def test_live_runner_enabled_defaults_to_true_when_env_missing(monkeypatch) -> None:
+    monkeypatch.delenv("LIVE_RUNNER_ENABLED", raising=False)
+
+    assert app_main._live_runner_enabled() is True
+
+
+def test_live_runner_enabled_treats_empty_env_as_default_true(monkeypatch) -> None:
+    monkeypatch.setenv("LIVE_RUNNER_ENABLED", "  ")
+
+    assert app_main._live_runner_enabled() is True
+
+
+def test_live_runner_enabled_accepts_true_values(monkeypatch) -> None:
+    for value in ("1", "true", "TRUE", "yes", "on"):
+        monkeypatch.setenv("LIVE_RUNNER_ENABLED", value)
+
+        assert app_main._live_runner_enabled() is True
+
+
+def test_live_runner_enabled_respects_explicit_false_values(monkeypatch) -> None:
+    for value in ("0", "false", "FALSE", "no", "off"):
+        monkeypatch.setenv("LIVE_RUNNER_ENABLED", value)
+
+        assert app_main._live_runner_enabled() is False
+
+
+def test_live_runner_enabled_keeps_unknown_values_enabled(monkeypatch, caplog) -> None:
+    monkeypatch.setenv("LIVE_RUNNER_ENABLED", "maybe")
+
+    with caplog.at_level(logging.WARNING, logger="crypto_flow_bot_v2.main"):
+        assert app_main._live_runner_enabled() is True
+
+    assert "Unrecognized LIVE_RUNNER_ENABLED='maybe'" in caplog.text
+    assert "keeping live runner enabled by default" in caplog.text
+
+
 def test_live_runner_interval_prefers_primary_env(monkeypatch) -> None:
     monkeypatch.setenv("LIVE_RUNNER_INTERVAL_SECONDS", "60")
     monkeypatch.setenv("LIVE_CYCLE_INTERVAL_SECONDS", "900")
