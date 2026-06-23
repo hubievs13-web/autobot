@@ -13,6 +13,7 @@ from crypto_flow_bot_v2.telegram_start import TelegramStartCommandPoller
 
 LOGGER = get_logger(__name__)
 TRUE_VALUES = {"1", "true", "yes", "on"}
+FALSE_VALUES = {"0", "false", "no", "off"}
 DEFAULT_LIVE_RUNNER_INTERVAL_SECONDS = 900
 LIVE_RUNNER_STARTUP_MESSAGE = "🚀 Crypto Flow Bot started. Live runner enabled."
 
@@ -46,7 +47,10 @@ def main() -> int:
     LOGGER.info("No Binance private API or real trading execution is active.")
 
     if not live_runner_enabled:
-        LOGGER.info("Live runner disabled. Set LIVE_RUNNER_ENABLED=true to start alerts.")
+        LOGGER.info(
+            "Live runner disabled by LIVE_RUNNER_ENABLED. Remove the variable or set it to true "
+            "to start 24/7 alerts."
+        )
         return 0
 
     cycle_interval_seconds = _live_runner_interval_seconds()
@@ -141,7 +145,22 @@ def _stop_telegram_start_poller(start_poller: tuple[Event, Thread]) -> None:
 
 
 def _live_runner_enabled() -> bool:
-    return os.getenv("LIVE_RUNNER_ENABLED", "").strip().lower() in TRUE_VALUES
+    raw = os.getenv("LIVE_RUNNER_ENABLED")
+    if raw is None or not raw.strip():
+        return True
+
+    normalized = raw.strip().lower()
+    if normalized in FALSE_VALUES:
+        return False
+    if normalized in TRUE_VALUES:
+        return True
+
+    LOGGER.warning(
+        "Unrecognized LIVE_RUNNER_ENABLED=%r; keeping live runner enabled by default. "
+        "Use false/0/no/off to disable it intentionally.",
+        raw,
+    )
+    return True
 
 
 def _live_runner_interval_seconds() -> int:
