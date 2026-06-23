@@ -276,6 +276,7 @@ class LiveAlertRunner:
                 telegram_alert_errors=close_alert.errors,
                 symbol_error=True,
             )
+        _log_decision(decision)
 
         try:
             open_event = self._position_manager.open_from_decision(decision)
@@ -369,6 +370,19 @@ class _MutableTotals:
             last_report=last_report,
             symbol_errors=self.symbol_errors,
         )
+
+
+def _log_decision(decision: SignalDecision) -> None:
+    LOGGER.info(
+        "live decision evaluated: symbol=%s signal_type=%s direction=%s confidence=%s "
+        "blocked_reason=%s reasons=%s",
+        decision.symbol,
+        decision.signal_type.value,
+        decision.direction.value,
+        decision.confidence,
+        decision.blocked_reason or "",
+        " | ".join(decision.reasons),
+    )
 
 
 def _counter_from_alert_result(result: TelegramAlertResult) -> _AlertCounter:
