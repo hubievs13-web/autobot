@@ -6,17 +6,27 @@ Alert-only Binance Futures monitoring project using the RFA Engine architecture.
 
 The application is alert-only. It uses public/read-only Binance Futures market-data endpoints, does not require Binance private credentials, does not submit exchange orders, and keeps project positions as virtual positions inside local state.
 
-## Safe/default startup
+## Default 24/7 startup
 
 ```bash
 python -m crypto_flow_bot_v2
 ```
 
-Without `LIVE_RUNNER_ENABLED=true`, the entrypoint loads and validates `config.yaml`, configures logging, writes the configured JSONL log file, prints a startup summary, logs Telegram credential diagnostics, and exits without starting the live loop.
+The live runner is enabled by default. If `LIVE_RUNNER_ENABLED` is missing, empty, or contains an unrecognized value, the entrypoint keeps the live loop enabled and logs a warning for unrecognized values. Only explicit false values (`0`, `false`, `no`, `off`) disable the live runner.
+
+## Config-only startup
+
+```bash
+LIVE_RUNNER_ENABLED=false python -m crypto_flow_bot_v2
+```
+
+This mode loads and validates `config.yaml`, configures logging, writes the configured JSONL log file, prints a startup summary, logs Telegram credential diagnostics, and exits without starting the live loop.
 
 ## Live runner startup
 
 ```bash
+python -m crypto_flow_bot_v2
+# or explicitly:
 LIVE_RUNNER_ENABLED=true python -m crypto_flow_bot_v2
 ```
 
@@ -48,7 +58,7 @@ For production alerts:
 1. Keep `telegram.enabled: true` in `config.yaml`, or omit `telegram.enabled` to use the code default.
 2. Set `TELEGRAM_BOT_TOKEN`.
 3. Set `TELEGRAM_CHAT_ID` to one ID or a comma-separated list.
-4. Set `LIVE_RUNNER_ENABLED=true`.
+4. Leave `LIVE_RUNNER_ENABLED` unset or set it to `true`. Set it to `false` only for a deliberate config-only run.
 
 To use `TELEGRAM_CHAT_IDS`, set `telegram.chat_id_env: TELEGRAM_CHAT_IDS` in `config.yaml` and provide that environment variable instead.
 
@@ -62,6 +72,8 @@ POSITION_STATE_PATH=data/positions.json
 TELEGRAM_BOT_TOKEN=
 TELEGRAM_CHAT_ID=
 ```
+
+`LIVE_RUNNER_ENABLED` defaults to enabled in code. Use `false`, `0`, `no`, or `off` only when you intentionally want to suppress the 24/7 live loop.
 
 `LIVE_RUNNER_INTERVAL_SECONDS` is preferred. `LIVE_CYCLE_INTERVAL_SECONDS` is still accepted for older deployments.
 
@@ -97,19 +109,19 @@ pip install -e ".[dev]"
 
 ## Smoke tests
 
-Minimal safe smoke test:
+Config-only smoke test:
 
 ```bash
-python -m crypto_flow_bot_v2
+LIVE_RUNNER_ENABLED=false python -m crypto_flow_bot_v2
 ```
 
 One-cycle live smoke test, only after Telegram/config are ready:
 
 ```bash
-LIVE_RUNNER_ENABLED=true LIVE_RUNNER_MAX_CYCLES=1 python -m crypto_flow_bot_v2
+LIVE_RUNNER_MAX_CYCLES=1 python -m crypto_flow_bot_v2
 ```
 
-Docker safe startup:
+Docker config-only startup:
 
 ```bash
 docker compose run --rm -e LIVE_RUNNER_ENABLED=false crypto-flow-bot-v2
@@ -119,7 +131,6 @@ Docker one-cycle live runner, only after Telegram/config are ready:
 
 ```bash
 docker compose run --rm \
-  -e LIVE_RUNNER_ENABLED=true \
   -e LIVE_RUNNER_MAX_CYCLES=1 \
   crypto-flow-bot-v2
 ```
