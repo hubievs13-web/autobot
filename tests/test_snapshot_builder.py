@@ -155,6 +155,30 @@ def test_market_snapshot_builder_keeps_running_when_liquidation_endpoint_fails(
     )
 
 
+def test_market_snapshot_builder_falls_back_for_unwrapped_liquidation_errors(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    config = _config()
+    client = _fake_client()
+    client.liquidation_error = TimeoutError("allForceOrders timeout")
+    builder = MarketSnapshotBuilder(data_client=client, config=config)
+
+    with caplog.at_level("ERROR"):
+        snapshot = builder.build("BTCUSDT")
+
+    assert snapshot.symbol == "BTCUSDT"
+    assert snapshot.metrics["open_interest"] == 12_500.0
+    assert snapshot.metrics["liquidation_count"] == 0
+    assert snapshot.metrics["liquidation_buy_count"] == 0
+    assert snapshot.metrics["liquidation_sell_count"] == 0
+    assert snapshot.metrics["liquidation_total_notional"] == 0.0
+    assert any(
+        "optional Binance liquidation data unavailable" in record.message
+        and "error_type=TimeoutError" in record.message
+        for record in caplog.records
+    )
+
+
 def test_market_snapshot_builder_build_many_uses_configured_symbols() -> None:
     builder = MarketSnapshotBuilder(data_client=_fake_client(), config=_config())
 
