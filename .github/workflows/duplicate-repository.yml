@@ -1,0 +1,47 @@
+name: Duplicate crypto-flow-bot-v2
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  duplicate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout autobot
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Copy source repository into autobot
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          SOURCE_REPO="https://github.com/hubievs13-web/crypto-flow-bot-v2.git"
+          SOURCE_DIR="$(mktemp -d)"
+
+          git clone --depth 1 "$SOURCE_REPO" "$SOURCE_DIR/source"
+
+          find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          shopt -s dotglob nullglob
+          cp -a "$SOURCE_DIR/source"/* .
+          rm -rf .gitkeep .bootstrap .github/workflows/duplicate-repository.yml
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
+
+          git commit -m "Duplicate crypto-flow-bot-v2 into autobot"
+          git push origin HEAD:main
