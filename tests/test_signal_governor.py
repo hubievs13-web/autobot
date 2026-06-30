@@ -62,7 +62,13 @@ def test_same_direction_signals_are_limited() -> None:
 
 
 def test_best_signals_are_ranked_by_score_risk_reward_and_volume_confirmation() -> None:
-    governor = SignalGovernor(_config(max_signals_per_scan=3, max_signals_per_hour=3))
+    governor = SignalGovernor(
+        _config(
+            max_signals_per_scan=3,
+            max_signals_per_hour=3,
+            same_direction_cluster_limit=3,
+        )
+    )
     decisions = (
         _decision("BTCUSDT", 80, take_profit_levels=(104.0, 106.0), reasons=("rfa",)),
         _decision("ETHUSDT", 80, take_profit_levels=(104.0, 108.0), reasons=("rfa",)),

@@ -4,7 +4,6 @@ import pytest
 
 from crypto_flow_bot_v2.config import BotConfig, load_config, parse_config
 
-
 VALID_CONFIG = """
 symbols:
   - BTCUSDT
@@ -43,6 +42,7 @@ rfa_engine:
   min_signal_confidence: 70
   watch_confidence: 60
   strong_signal_confidence: 85
+  min_evidence_components: 5
   require_context_alignment: true
   require_macro_alignment: true
 """
@@ -66,6 +66,7 @@ def test_load_config_from_yaml_file(tmp_path: Path) -> None:
     assert config.telegram.enabled is False
     assert config.risk.min_risk_reward == 1.5
     assert config.rfa_engine.min_signal_confidence == 70
+    assert config.rfa_engine.min_evidence_components == 5
 
 
 def test_parse_config_defaults_missing_telegram_enabled_to_true() -> None:
@@ -75,6 +76,24 @@ def test_parse_config_defaults_missing_telegram_enabled_to_true() -> None:
     config = parse_config(raw)
 
     assert config.telegram.enabled is True
+
+
+def test_parse_config_defaults_missing_rfa_min_evidence_components_to_six() -> None:
+    raw = _valid_raw_config()
+    del raw["rfa_engine"]["min_evidence_components"]
+
+    config = parse_config(raw)
+
+    assert config.rfa_engine.min_evidence_components == 6
+
+
+@pytest.mark.parametrize("value", [0, -1, 11])
+def test_parse_config_rejects_invalid_rfa_min_evidence_components(value: int) -> None:
+    raw = _valid_raw_config()
+    raw["rfa_engine"]["min_evidence_components"] = value
+
+    with pytest.raises(ValueError, match="min_evidence_components"):
+        parse_config(raw)
 
 
 def test_parse_config_rejects_empty_symbols() -> None:
@@ -117,6 +136,7 @@ def _valid_raw_config() -> dict[str, object]:
             "min_signal_confidence": 70,
             "watch_confidence": 60,
             "strong_signal_confidence": 85,
+            "min_evidence_components": 5,
             "require_context_alignment": True,
             "require_macro_alignment": True,
         },

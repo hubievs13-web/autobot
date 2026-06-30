@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import UTC, datetime
 
 from crypto_flow_bot_v2.config import BotConfig, parse_config
@@ -105,6 +106,40 @@ def test_rfa_engine_blocks_missing_required_metric() -> None:
 
     assert decision.signal_type is SignalType.NO_TRADE
     assert decision.blocked_reason == "missing_metrics:funding_rate"
+
+
+def test_rfa_engine_allows_configured_five_component_confluence() -> None:
+    snapshot = _snapshot(
+        metrics={
+            "entry_return_pct": 1.4,
+            "context_return_pct": 2.1,
+            "macro_return_pct": 3.2,
+            "entry_atr": 2.0,
+            "entry_atr_pct": 6.0,
+            "entry_taker_buy_quote_ratio": 0.50,
+            "open_interest": 12_000.0,
+            "funding_rate": 0.0,
+            "long_short_ratio": 1.0,
+            "taker_buy_sell_ratio": 1.40,
+            "liquidation_buy_notional": 20_000.0,
+            "liquidation_sell_notional": 20_000.0,
+        },
+    )
+    base_config = _config()
+    config = replace(
+        base_config,
+        rfa_engine=replace(
+            base_config.rfa_engine,
+            min_signal_confidence=60,
+            min_evidence_components=5,
+        ),
+    )
+
+    decision = RFAEngine(config).evaluate(snapshot)
+
+    assert decision.signal_type is SignalType.LONG_CONTINUATION
+    assert decision.blocked_reason is None
+    assert sum(reason.startswith("+") for reason in decision.reasons) == 5
 
 
 def _snapshot(

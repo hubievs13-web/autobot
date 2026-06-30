@@ -2,8 +2,13 @@ from datetime import UTC, datetime, timedelta
 
 from crypto_flow_bot_v2.candidate_engine import StatefulCandidateEngine
 from crypto_flow_bot_v2.config import parse_config
-from crypto_flow_bot_v2.models import MarketRegime, MarketSnapshot, SignalDecision
-from crypto_flow_bot_v2.models import SignalDirection, SignalType
+from crypto_flow_bot_v2.models import (
+    MarketRegime,
+    MarketSnapshot,
+    SignalDecision,
+    SignalDirection,
+    SignalType,
+)
 
 NOW = datetime(2026, 1, 1, tzinfo=UTC)
 
@@ -101,6 +106,21 @@ def test_candidate_cannot_signal_without_hard_filters() -> None:
     assert engine.candidates[0].hard_filters_passed is False
 
 
+def test_snapshot_hard_filters_use_configured_min_evidence_components() -> None:
+    raw = _raw_config()
+    raw["rfa_engine"]["min_evidence_components"] = 5
+    engine = StatefulCandidateEngine(parse_config(raw))
+
+    result = engine.process(
+        _snapshot(metrics=_five_component_metrics()),
+        _blocked_no_trade_decision(),
+    )
+
+    assert result.candidate is not None
+    assert result.candidate.hard_filters_passed is True
+    assert "insufficient_rfa_confluence" not in result.candidate.missing_conditions
+
+
 def test_parse_config_candidate_engine_section() -> None:
     raw = _raw_config()
     raw["candidate_engine"] = {
@@ -126,6 +146,7 @@ def test_parse_config_candidate_engine_section() -> None:
 def _snapshot(
     symbol: str = "BTCUSDT",
     timestamp: datetime = NOW,
+    metrics: dict[str, float] | None = None,
 ) -> MarketSnapshot:
     return MarketSnapshot(
         symbol=symbol,
@@ -135,7 +156,7 @@ def _snapshot(
         macro_timeframe="4h",
         price=100.0,
         regime=MarketRegime.TREND_UP,
-        metrics={},
+        metrics={} if metrics is None else metrics,
     )
 
 
@@ -156,6 +177,38 @@ def _trade_decision(
         take_profit_levels=(103.0, 105.0) if stop_loss is not None else (),
         reasons=("+10: rfa confluence", "risk/reward=1.67"),
     )
+
+
+def _blocked_no_trade_decision() -> SignalDecision:
+    return SignalDecision(
+        symbol="BTCUSDT",
+        timestamp=NOW,
+        signal_type=SignalType.NO_TRADE,
+        direction=SignalDirection.NONE,
+        confidence=68,
+        entry_price=None,
+        stop_loss=None,
+        take_profit_levels=(),
+        reasons=("not enough evidence",),
+        blocked_reason="insufficient_rfa_confluence",
+    )
+
+
+def _five_component_metrics() -> dict[str, float]:
+    return {
+        "entry_return_pct": 1.4,
+        "context_return_pct": 2.1,
+        "macro_return_pct": 3.2,
+        "entry_atr": 2.0,
+        "entry_atr_pct": 6.0,
+        "entry_taker_buy_quote_ratio": 0.50,
+        "open_interest": 12_000.0,
+        "funding_rate": 0.0,
+        "long_short_ratio": 1.0,
+        "taker_buy_sell_ratio": 1.40,
+        "liquidation_buy_notional": 20_000.0,
+        "liquidation_sell_notional": 20_000.0,
+    }
 
 
 def _config():
